@@ -1,90 +1,103 @@
 // Grafana Alloy configuration for collecting Docker logs
 
-// Discover Docker containers
+// Connects to Docker daemon and automatically discovers all running containers
+// Refreshes the container list every 5 seconds to catch new/stopped containers
 discovery.docker "containers" {
   host = "unix:///var/run/docker.sock"
   refresh_interval = "5s"
 }
 
-// Read logs from Docker containers
+// Collects logs from all discovered Docker containers
+// Uses the targets from the discovery above to know which containers to monitor
 loki.source.docker "docker_logs" {
   host       = "unix:///var/run/docker.sock"
-  targets    = discovery.docker.containers.targets
-  forward_to = [loki.process.parse_logs.receiver]
+  targets    = discovery.docker.containers.targets  // Gets container list from discovery above
+  forward_to = [loki.process.parse_logs.receiver]   // Sends raw logs to processing pipeline
   refresh_interval = "5s"
 }
 
-// Process and parse the logs
+// Main log processing pipeline - enriches and parses the raw Docker logs
 loki.process "parse_logs" {
-  forward_to = [loki.write.loki_endpoint.receiver]
-
+  forward_to = [loki.write.loki_endpoint.receiver]  // After processing, send to Loki
+  
+  // Add a static label to all logs to identify them as Docker logs
   stage.static_labels {
     values = {
       job = "docker-logs",
     }
   }
-
+  
+  // Parse Docker's JSON log format to extract useful fields
+  // Docker logs come in JSON with fields like: {"log":"actual message","time":"2024-01-01T12:00:00Z","attrs":{"name":"container_name"}}
   stage.json {
     expressions = {
-      timestamp = "time",
-      message   = "log",
-      container = "attrs.name",
-      image     = "attrs.image",
+      timestamp = "time",        // Extract timestamp from "time" field
+      message   = "log",         // Extract actual log message from "log" field
+      container = "attrs.name",  // Get container name from attributes
+      image     = "attrs.image", // Get image name from attributes
     }
   }
-
+  
+  // Convert extracted fields into Loki labels for easier filtering/querying
   stage.labels {
     values = {
-      container_name = "container",
-      image_name     = "image",
+      container_name = "container",  // Creates label from extracted container field
+      image_name     = "image",      // Creates label from extracted image field
     }
   }
-
+  
+  // Parse the timestamp string into proper time format for Loki
   stage.timestamp {
     source = "timestamp"
     format = "RFC3339"
   }
-
-  // Extract log level from the message if present
+  
+  // Try to extract log level from the actual log message using regex
+  // Looks for patterns like "[2024-01-01] INFO:" or "[timestamp] ERROR:" in the message
+  // This only works if your applications log in this specific format
   stage.regex {
     expression = "\\[.*?\\]\\s+(?P<level>INFO|WARNING|ERROR|DEBUG):"
   }
-
+  
+  // If log level was found by regex above, add it as a label
   stage.labels {
     values = {
-      level = "level",
+      level = "level",  // Creates "level" label from the regex capture group
     }
   }
 }
 
-// Send logs to Loki
+// Send all processed logs to Loki instance for storage
 loki.write "loki_endpoint" {
   endpoint {
-    url = "http://loki:3100/loki/api/v1/push"
+    url = "http://loki:3100/loki/api/v1/push"  // Assumes Loki running on port 3100
   }
 }
 
-// Expose metrics endpoint
+// Collect system metrics (CPU, memory, disk, network, etc.) from the host
 prometheus.exporter.unix "default" {
-  include_exporter_metrics = true
+  include_exporter_metrics = true  // Also include metrics about the exporter itself
 }
 
+// Scrape the system metrics collected above
 prometheus.scrape "default" {
-  targets    = prometheus.exporter.unix.default.targets
-  forward_to = [prometheus.remote_write.mimir.receiver]
-  scrape_interval = "10s"
+  targets    = prometheus.exporter.unix.default.targets  // Gets metrics from Unix exporter
+  forward_to = [prometheus.remote_write.mimir.receiver]   // Send metrics to remote write endpoint
+  scrape_interval = "10s"  // Collect metrics every 10 seconds
 }
 
-// Optional: Send metrics to a remote endpoint (commented out for this POC)
+// This is where metrics should go, but it's currently broken
+// The real Mimir endpoint is commented out below
 // prometheus.remote_write "mimir" {
 //   endpoint {
-//     url = "http://mimir:9009/api/v1/push"
+//     url = "http://mimir:9009/api/v1/push"  // Real Mimir instance
 //   }
 // }
 
-// For this POC, we'll just use a dummy receiver for metrics
+// HACK: Dummy endpoint since real Mimir is commented out
+// This will fail but prevents config errors - fix this by uncommenting real endpoint above
 prometheus.remote_write "mimir" {
   endpoint {
-    url = "http://localhost:9999/api/v1/push"
+    url = "http://localhost:9999/api/v1/push"  // This doesn't exist and will fail
   }
 }

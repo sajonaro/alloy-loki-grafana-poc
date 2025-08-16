@@ -1,0 +1,227 @@
+// Grafana Alloy Configuration Skeleton
+// Remove/uncomment sections as needed for your use case
+
+//=============================================================================
+// DISCOVERY COMPONENTS - Find targets to monitor
+//=============================================================================
+
+// Discover Docker containers
+// discovery.docker "containers" {
+//   host = "unix:///var/run/docker.sock"
+//   refresh_interval = "5s"
+// }
+
+// Discover Kubernetes pods
+// discovery.kubernetes "pods" {
+//   role = "pod"
+// }
+
+// Discover services via Consul
+// discovery.consul "services" {
+//   server = "localhost:8500"
+// }
+
+// Static targets (manual list)
+// discovery.relabel "static_targets" {
+//   targets = [
+//     {"__address__" = "app1:8080"},
+//     {"__address__" = "app2:8080"},
+//   ]
+//   rule {
+//     target_label = "job"
+//     replacement  = "my-app"
+//   }
+// }
+
+//=============================================================================
+// LOG COLLECTION
+//=============================================================================
+
+// Collect logs from files
+// loki.source.file "app_logs" {
+//   targets = [
+//     {__path__ = "/var/log/app/*.log", job = "app"},
+//   ]
+//   forward_to = [loki.process.parse_logs.receiver]
+// }
+
+// Collect Docker container logs
+// loki.source.docker "docker_logs" {
+//   host       = "unix:///var/run/docker.sock"
+//   targets    = discovery.docker.containers.targets
+//   forward_to = [loki.process.parse_logs.receiver]
+// }
+
+// Collect systemd journal logs
+// loki.source.journal "system_logs" {
+//   forward_to = [loki.process.parse_logs.receiver]
+//   labels = {
+//     job = "systemd",
+//   }
+// }
+
+//=============================================================================
+// LOG PROCESSING
+//=============================================================================
+
+// loki.process "parse_logs" {
+//   forward_to = [loki.write.default.receiver]
+//   
+//   // Add static labels
+//   stage.static_labels {
+//     values = {
+//       environment = "production",
+//     }
+//   }
+//   
+//   // Parse JSON logs
+//   stage.json {
+//     expressions = {
+//       level     = "level",
+//       message   = "message",
+//       timestamp = "timestamp",
+//     }
+//   }
+//   
+//   // Extract fields with regex
+//   stage.regex {
+//     expression = "\\[(?P<timestamp>\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2})\\]\\s+(?P<level>\\w+):\\s+(?P<message>.*)"
+//   }
+//   
+//   // Create labels from extracted fields
+//   stage.labels {
+//     values = {
+//       level = "level",
+//     }
+//   }
+//   
+//   // Parse timestamp
+//   stage.timestamp {
+//     source = "timestamp"
+//     format = "2006-01-02 15:04:05"
+//   }
+//   
+//   // Drop noisy logs
+//   stage.drop {
+//     expression = ".*health check.*"
+//   }
+// }
+
+//=============================================================================
+// METRICS COLLECTION
+//=============================================================================
+
+// Scrape HTTP metrics endpoints
+// prometheus.scrape "app_metrics" {
+//   targets         = discovery.docker.containers.targets
+//   forward_to      = [prometheus.relabel.add_labels.receiver]
+//   scrape_interval = "15s"
+//   metrics_path    = "/metrics"
+// }
+
+// Collect system metrics
+// prometheus.exporter.unix "system" {
+//   include_exporter_metrics = true
+// }
+// 
+// prometheus.scrape "system_metrics" {
+//   targets    = prometheus.exporter.unix.system.targets
+//   forward_to = [prometheus.remote_write.default.receiver]
+//   job_name   = "node-exporter"
+// }
+
+//=============================================================================
+// METRICS PROCESSING
+//=============================================================================
+
+// Add/modify metric labels
+// prometheus.relabel "add_labels" {
+//   forward_to = [prometheus.remote_write.default.receiver]
+//   
+//   rule {
+//     target_label = "environment"
+//     replacement  = "production"
+//   }
+//   
+//   rule {
+//     source_labels = ["__address__"]
+//     target_label  = "instance"
+//     regex         = "([^:]+).*"
+//     replacement   = "${1}"
+//   }
+// }
+
+//=============================================================================
+// TRACES COLLECTION (OpenTelemetry)
+//=============================================================================
+
+// Receive OTLP traces
+// otelcol.receiver.otlp "default" {
+//   grpc {
+//     endpoint = "0.0.0.0:4317"
+//   }
+//   http {
+//     endpoint = "0.0.0.0:4318"
+//   }
+//   output {
+//     traces = [otelcol.processor.batch.default.input]
+//   }
+// }
+
+// Batch traces for efficiency
+// otelcol.processor.batch "default" {
+//   output {
+//     traces = [otelcol.exporter.otlp.default.input]
+//   }
+// }
+
+//=============================================================================
+// OUTPUT COMPONENTS - Send data to destinations
+//=============================================================================
+
+// Send logs to Loki
+// loki.write "default" {
+//   endpoint {
+//     url = "http://loki:3100/loki/api/v1/push"
+//     // Optional: basic auth
+//     // basic_auth {
+//     //   username = "user"
+//     //   password = "pass"
+//     // }
+//   }
+// }
+
+// Send metrics to Prometheus/Mimir
+// prometheus.remote_write "default" {
+//   endpoint {
+//     url = "http://prometheus:9090/api/v1/write"
+//     // Optional: remote write auth
+//     // basic_auth {
+//     //   username = "user"
+//     //   password = "pass"
+//     // }
+//   }
+// }
+
+// Send traces to Tempo/Jaeger
+// otelcol.exporter.otlp "default" {
+//   client {
+//     endpoint = "http://tempo:4317"
+//     tls {
+//       insecure = true
+//     }
+//   }
+// }
+
+//=============================================================================
+// OPTIONAL: DEBUGGING & MONITORING
+//=============================================================================
+
+// Expose Alloy's own metrics
+// prometheus.exporter.self "alloy" {}
+// 
+// prometheus.scrape "alloy_metrics" {
+//   targets    = prometheus.exporter.self.alloy.targets
+//   forward_to = [prometheus.remote_write.default.receiver]
+//   job_name   = "alloy"
+// }
