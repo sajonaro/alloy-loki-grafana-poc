@@ -1,0 +1,120 @@
+// Grafana Alloy configuration for ECS deployment
+
+// Discover ECS tasks and services
+discovery.ecs "ecs_tasks" {
+  region          = "us-east-1"  // Your AWS region
+  access_key      = env("AWS_ACCESS_KEY_ID")
+  secret_key      = env("AWS_SECRET_ACCESS_KEY")
+  refresh_interval = "30s"
+  
+  // Filter for specific services or clusters
+  port = 80
+}
+
+// Alternative: Use CloudWatch Logs for ECS
+loki.source.cloudwatch_logs "ecs_logs" {
+  region     = "us-east-1"
+  access_key = env("AWS_ACCESS_KEY_ID")
+  secret_key = env("AWS_SECRET_ACCESS_KEY")
+  
+  // Target specific log groups
+  log_groups = [
+    {
+      log_group_name = "/ecs/php-app"
+      log_stream_name_prefix = "ecs/"
+    }
+  ]
+  
+  forward_to = [loki.process.parse_ecs_logs.receiver]
+}
+
+// Process ECS logs
+loki.process "parse_ecs_logs" {
+  forward_to = [loki.write.loki_endpoint.receiver]
+
+  stage.static_labels {
+    values = {
+      job = "ecs-logs",
+      environment = "production",  // or staging, dev, etc.
+    }
+  }
+
+  // Extract ECS metadata
+  stage.json {
+    expressions = {
+      timestamp = "timestamp",
+      message   = "message",
+      task_arn  = "task_arn",
+      container_name = "container_name",
+      log_stream = "log_stream",
+    }
+  }
+
+  stage.labels {
+    values = {
+      task_arn = "task_arn",
+      container_name = "container_name",
+      log_stream = "log_stream",
+    }
+  }
+
+  stage.timestamp {
+    source = "timestamp"
+    format = "RFC3339"
+  }
+
+  // Extract log level from PHP logs
+  stage.regex {
+    expression = "\\[.*?\\]\\s+(?P<level>INFO|WARNING|ERROR|DEBUG):"
+  }
+
+  stage.labels {
+    values = {
+      level = "level",
+    }
+  }
+}
+
+// Alternative: Use ECS Service Discovery with Prometheus for metrics
+discovery.ecs "ecs_services" {
+  region          = "us-east-1"
+  access_key      = env("AWS_ACCESS_KEY_ID")
+  secret_key      = env("AWS_SECRET_ACCESS_KEY")
+  refresh_interval = "30s"
+  port = 9090  // Metrics port
+}
+
+// Scrape metrics from ECS services
+prometheus.scrape "ecs_metrics" {
+  targets    = discovery.ecs.ecs_services.targets
+  forward_to = [prometheus.remote_write.remote_endpoint.receiver]
+  scrape_interval = "30s"
+  
+  // Add ECS-specific labels
+  honor_labels = true
+}
+
+// Send logs to Loki (could be remote Grafana Cloud or self-hosted)
+loki.write "loki_endpoint" {
+  endpoint {
+    url = env("LOKI_ENDPOINT")  // e.g., https://your-loki-instance.com/loki/api/v1/push
+    
+    // For Grafana Cloud
+    basic_auth {
+      username = env("GRAFANA_CLOUD_USER")
+      password = env("GRAFANA_CLOUD_API_KEY")
+    }
+  }
+}
+
+// Send metrics to remote endpoint
+prometheus.remote_write "remote_endpoint" {
+  endpoint {
+    url = env("PROMETHEUS_ENDPOINT")  // e.g., https://prometheus-prod-10-prod-us-central-0.grafana.net/api/prom/push
+    
+    basic_auth {
+      username = env("GRAFANA_CLOUD_PROMETHEUS_USER")
+      password = env("GRAFANA_CLOUD_API_KEY")
+    }
+  }
+}

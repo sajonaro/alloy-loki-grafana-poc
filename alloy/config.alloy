@@ -1,4 +1,4 @@
-// Grafana Alloy configuration for collecting Docker logs
+// Grafana Alloy configuration for collecting Docker logs only
 
 // Connects to Docker daemon and automatically discovers all running containers
 // Refreshes the container list every 5 seconds to catch new/stopped containers
@@ -71,33 +71,5 @@ loki.process "parse_logs" {
 loki.write "loki_endpoint" {
   endpoint {
     url = "http://loki:3100/loki/api/v1/push"  // Assumes Loki running on port 3100
-  }
-}
-
-// Collect system metrics (CPU, memory, disk, network, etc.) from the host
-prometheus.exporter.unix "default" {
-  include_exporter_metrics = true  // Also include metrics about the exporter itself
-}
-
-// Scrape the system metrics collected above
-prometheus.scrape "default" {
-  targets    = prometheus.exporter.unix.default.targets  // Gets metrics from Unix exporter
-  forward_to = [prometheus.remote_write.mimir.receiver]   // Send metrics to remote write endpoint
-  scrape_interval = "10s"  // Collect metrics every 10 seconds
-}
-
-// This is where metrics should go, but it's currently broken
-// The real Mimir endpoint is commented out below
-// prometheus.remote_write "mimir" {
-//   endpoint {
-//     url = "http://mimir:9009/api/v1/push"  // Real Mimir instance
-//   }
-// }
-
-// HACK: Dummy endpoint since real Mimir is commented out
-// This will fail but prevents config errors - fix this by uncommenting real endpoint above
-prometheus.remote_write "mimir" {
-  endpoint {
-    url = "http://localhost:9999/api/v1/push"  // This doesn't exist and will fail
   }
 }
