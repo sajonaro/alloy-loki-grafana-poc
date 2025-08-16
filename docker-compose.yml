@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # PHP application that generates logs
+  php-app:
+    build:
+      context: ./php-app
+      dockerfile: Dockerfile
+    container_name: php-app
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=php-app"
+    labels:
+      - "service=php-app"
+    networks:
+      - logging-network
+    depends_on:
+      - alloy
+
+  # Grafana Alloy for log collection
+  alloy:
+    image: grafana/alloy:latest
+    container_name: alloy
+    ports:
+      - "12345:12345"
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+    networks:
+      - logging-network
+    depends_on:
+      - loki
+
+  # Loki for log storage
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - logging-network
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - logging-network
+    depends_on:
+      - loki
+
+networks:
+  logging-network:
+    driver: bridge
+
+volumes:
+  loki-data:
+  grafana-data:

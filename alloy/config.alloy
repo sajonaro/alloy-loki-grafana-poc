@@ -1,0 +1,90 @@
+// Grafana Alloy configuration for collecting Docker logs
+
+// Discover Docker containers
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+// Read logs from Docker containers
+loki.source.docker "docker_logs" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.docker.containers.targets
+  forward_to = [loki.process.parse_logs.receiver]
+  refresh_interval = "5s"
+}
+
+// Process and parse the logs
+loki.process "parse_logs" {
+  forward_to = [loki.write.loki_endpoint.receiver]
+
+  stage.static_labels {
+    values = {
+      job = "docker-logs",
+    }
+  }
+
+  stage.json {
+    expressions = {
+      timestamp = "time",
+      message   = "log",
+      container = "attrs.name",
+      image     = "attrs.image",
+    }
+  }
+
+  stage.labels {
+    values = {
+      container_name = "container",
+      image_name     = "image",
+    }
+  }
+
+  stage.timestamp {
+    source = "timestamp"
+    format = "RFC3339"
+  }
+
+  // Extract log level from the message if present
+  stage.regex {
+    expression = "\\[.*?\\]\\s+(?P<level>INFO|WARNING|ERROR|DEBUG):"
+  }
+
+  stage.labels {
+    values = {
+      level = "level",
+    }
+  }
+}
+
+// Send logs to Loki
+loki.write "loki_endpoint" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// Expose metrics endpoint
+prometheus.exporter.unix "default" {
+  include_exporter_metrics = true
+}
+
+prometheus.scrape "default" {
+  targets    = prometheus.exporter.unix.default.targets
+  forward_to = [prometheus.remote_write.mimir.receiver]
+  scrape_interval = "10s"
+}
+
+// Optional: Send metrics to a remote endpoint (commented out for this POC)
+// prometheus.remote_write "mimir" {
+//   endpoint {
+//     url = "http://mimir:9009/api/v1/push"
+//   }
+// }
+
+// For this POC, we'll just use a dummy receiver for metrics
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = "http://localhost:9999/api/v1/push"
+  }
+}
